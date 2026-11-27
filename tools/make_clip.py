@@ -1,15 +1,16 @@
-"""Build a MIRROR daily clip (1080x1920, 24s) from the /daily.json brief.
+"""Build a MIRROR daily clip (1080x1920, ~20s) from the /daily.json brief.
 
 usage: python3 make_clip.py brief.json OUTDIR   -> OUTDIR/MIRROR_<date>.mp4
 Needs: ffmpeg, Pillow, numpy, and the Silkscreen + Poppins TTF fonts (paths below).
 """
-import os, sys, json, subprocess, wave
+import os, sys, json, subprocess, wave, math, random
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageChops
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 W, H, FPS = 1080, 1920, 30
 BG, CREAM, LIME = (17, 17, 17), (240, 236, 225), (212, 255, 58)
+PINK = (255, 92, 172)
 DIM, CARD = (120, 118, 110), (30, 30, 28)
 PIX = os.path.join(HERE, "Silkscreen-700.ttf")
 POP = os.environ.get("POPPINS", "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf")
@@ -91,65 +92,94 @@ def card(d, i, y, reveal=0.0, hl=False, dim=False):
         pct_draw(d, x1 - 30, y + 34, int(round(PCT[i] * reveal)), 58, LIME if hl else col)
 
 def s_hook(t):
-    im, d = base(); logo(d, 170)
-    off = int((1 - ease(t / 0.5)) * 60)
-    tc(d, 640 + off, "WHAT DID", F(120), CREAM)
-    if t > 0.6: tc(d, 790, "MOST PEOPLE", F(120), CREAM)
-    if t > 1.2: tc(d, 940, "PICK?", F(190), LIME)
-    if t > 2.0: tc(d, 1250, f"Today's {Q['difficulty']} question", F(54, "popm"), CREAM)
+    im, d = base(); logo(d, 190)
+    off = int((1 - ease(t / 0.25)) * 50)
+    tc(d, 600 + off, f"{Q['totalVotes']} PEOPLE", F(130), CREAM)
+    tc(d, 750 + off, "ANSWERED THIS.", fit(d, "ANSWERED THIS.", "pop", 112, W - 200), CREAM)
+    tc(d, 960, "CAN YOU GUESS", F(74, "popm"), CREAM)
+    tc(d, 1050, "WHAT MOST PICKED?", F(92), LIME)
+    tc(d, 1250, f"{Q['difficulty']} QUESTION", F(46, "pix"), PINK, sp=6)
     return im
 
 def s_question(t):
-    im, d = base(); logo(d, 170)
-    tc(d, 330, "QUESTION", F(40, "pix"), DIM, sp=8)
-    y = 410
+    im, d = base(); logo(d, 190)
+    tc(d, 340, "QUESTION", F(40, "pix"), DIM, sp=8)
+    y = 420
     for ln in wrap(d, Q["question"], F(58), W - 180):
         tc(d, y, ln, F(58), CREAM); y += 78
     tc(d, y + 20, "Pick what MOST people choose.", F(38, "popm"), LIME)
     for i in range(4):
-        a = ease((t - 0.3 - i * 0.25) / 0.35)
-        if a > 0: card(d, i, 790 + i * 200 + int((1 - a) * 40))
+        a = ease((t - 0.2 - i * 0.2) / 0.3)
+        if a > 0: card(d, i, 800 + i * 200 + int((1 - a) * 40))
     return im
 
 def s_count(t):
-    im, d = base(); logo(d, 170)
-    tc(d, 330, "LOCK IT IN", F(44, "pix"), DIM, sp=8)
+    im, d = base(); logo(d, 190)
+    tc(d, 340, "COMMENT YOUR GUESS", F(44, "pix"), LIME, sp=6)
     for i in range(4): card(d, i, 560 + i * 200)
-    n = 5 - int(t); fr = t - int(t)
-    tc(d, 1380, str(max(n, 1)), F(int(260 + 60 * (1 - ease(fr * 3))), "pix"), LIME)
+    n = 4 - int(t); fr = t - int(t)
+    tc(d, 1390, str(max(n, 1)), F(int(250 + 70 * (1 - ease(fr * 3))), "pix"), LIME if n > 1 else PINK)
     return im
 
+def confetti(d, tt):
+    rnd = random.Random(7)
+    for i in range(80):
+        x0, vy, sz = rnd.random() * W, 260 + rnd.random() * 520, rnd.choice([12, 16, 20])
+        col = rnd.choice([LIME, CREAM, PINK, LIME])
+        x = x0 + math.sin(tt * 4 + i) * 28; y = 520 + vy * tt * 0.9
+        if 540 < y < H - 330: d.rectangle([x, y, x + sz, y + sz], fill=col)
+
 def s_reveal(t):
-    im, d = base(); logo(d, 170)
-    tc(d, 330, "THE CROWD SAID", F(44, "pix"), DIM, sp=8)
-    r, done = ease(t / 2.2), t > 2.4
+    im, d = base(); logo(d, 190)
+    tc(d, 340, "THE CROWD SAID", F(44, "pix"), DIM, sp=8)
+    r, done = ease(t / 2.0), t > 2.2
+    if done: confetti(d, t - 2.2)          # behind the cards so it never hides text
     for i in range(4):
         hl = done and i in WIN
         card(d, i, 560 + i * 200, reveal=r, hl=hl, dim=(done and not hl))
     if done:
         if len(WIN) > 1:
             tc(d, 1380, "TIE", F(170, "pix"), LIME)
-            if t > 3.6: tc(d, 1570, f"Two answers. {PCT[WIN[0]]}% each.", F(52, "popm"), CREAM)
+            if t > 3.2: tc(d, 1570, f"Two answers. {PCT[WIN[0]]}% each.", F(52, "popm"), CREAM)
         else:
             pct_draw(d, 0, 1380, PCT[WIN[0]], 170, LIME, center=True)
-            if t > 3.6:
+            if t > 3.2:
                 wt = CH[WIN[0]]["text"]
                 tc(d, 1580, wt, fit(d, wt, "popm", 52, W - 200), CREAM)
+        if t < 2.55:  # screen shake on the reveal
+            k = 1 - (t - 2.2) / 0.35; dx = int(16 * math.sin(t * 90) * k); dy = int(12 * math.cos(t * 70) * k)
+            im = ImageChops.offset(im, dx, dy)
     return im
 
 def s_cta(t):
-    im, d = base(); logo(d, 360)
-    tc(d, 640, "COULD YOU", F(110), CREAM); tc(d, 770, "READ THE", F(110), CREAM); tc(d, 900, "ROOM?", F(150), LIME)
-    tc(d, 1180, "New questions every day", F(52, "popm"), CREAM)
-    d.rectangle([140, 1300, W - 140, 1470], fill=LIME)
-    tc(d, 1340, "mirror.vednt.com", F(78), BG)
-    tc(d, 1530, "Beat my score. Link in bio.", F(46, "popm"), CREAM)
+    im, d = base(); logo(d, 300)
+    pop = 1 + 0.06 * math.sin(t * 8)
+    tc(d, 560, "DROP A W", F(int(150 * pop)), LIME)
+    tc(d, 740, "IF YOU GOT IT", F(96), CREAM)
+    tc(d, 960, "New questions every day", F(52, "popm"), CREAM)
+    d.rectangle([140, 1090, W - 140, 1260], fill=LIME)
+    tc(d, 1130, "mirror.vednt.com", F(78), BG)
+    tc(d, 1330, "Follow for tomorrow's", F(46, "popm"), PINK)
     return im
 
-SCENES = [("hook", s_hook, 3.0), ("question", s_question, 5.0), ("count", s_count, 5.0),
-          ("reveal", s_reveal, 6.0), ("cta", s_cta, 5.0)]
+SCENES = [("hook", s_hook, 2.5), ("question", s_question, 4.5), ("count", s_count, 4.0),
+          ("reveal", s_reveal, 5.5), ("cta", s_cta, 3.5)]
+STARTS = {}
+_t = 0.0
+for _n, _f, _d in SCENES:
+    STARTS[_n] = _t; _t += _d
+TOTAL = _t
+
+def with_progress(fn, t0):
+    def g(t):
+        im = fn(t); d = ImageDraw.Draw(im)
+        d.rectangle([80, 150, W - 80, 158], fill=(46, 46, 42))
+        d.rectangle([80, 150, 80 + (W - 160) * min(1, (t0 + t) / TOTAL), 158], fill=LIME)
+        return im
+    return g
 
 def render(name, fn, dur):
+    fn = with_progress(fn, STARTS[name])
     final, tmp = f"{OUT}/{name}.mp4", f"{OUT}/{name}.tmp.mp4"
     p = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
@@ -166,58 +196,55 @@ def _note(f, n, kind="sq", duty=0.5):
     ph = (t * f) % 1.0
     return np.where(ph < duty, 1.0, -1.0) if kind == "sq" else np.sin(2 * np.pi * f * t)
 
-def music(total=24.0):
-    """Original royalty-free chiptune loop (A minor: Am-F-C-G), 124 BPM, built for the 24s clip."""
+def music(total):
+    """Original royalty-free chill chiptune loop (A minor: Am-F-C-G), 88 BPM, soft and slow."""
     n_tot = int(SR * total); m = np.zeros(n_tot)
-    beat = 60.0 / 124; step = beat / 4  # 16th note
+    beat = 60.0 / 88
     mf = lambda midi: 440.0 * 2 ** ((midi - 69) / 12)
-    chords = [(45, [57, 60, 64]), (41, [57, 60, 65]), (48, [60, 64, 67]), (43, [59, 62, 67])]  # bass, arp tones
+    chords = [(45, [57, 60, 64]), (41, [57, 60, 65]), (48, [60, 64, 67]), (43, [59, 62, 67])]
     def add(t0, arr, vol):
         i = int(t0 * SR)
         if i >= n_tot: return
         j = min(n_tot, i + len(arr)); m[i:j] += arr[:j - i] * vol
-    nsteps = int(total / step)
-    for k in range(nsteps):
-        t0 = k * step
-        bar = int(t0 / (beat * 4)) % 4
-        root, tones = chords[bar]
-        sec = "intro" if t0 < 3 else "q" if t0 < 8 else "count" if t0 < 13 else "reveal" if t0 < 19 else "cta"
-        # arp (16ths), pulse 25%
-        nl = int(step * 0.9 * SR); env = np.exp(-np.arange(nl) / SR * 14)
-        arp_vol = {"intro": 0.05, "q": 0.07, "count": 0.09, "reveal": 0.09, "cta": 0.08}[sec]
-        tone = tones[k % 3] + (12 if sec in ("reveal", "cta") and (k // 3) % 2 else 0)
-        add(t0, _note(mf(tone), nl, "sq", 0.25) * env, arp_vol)
-        # bass (8ths)
-        if k % 2 == 0 and sec != "intro":
-            bl = int(step * 1.8 * SR); be = np.exp(-np.arange(bl) / SR * 7)
-            add(t0, _note(mf(root), bl, "sq", 0.5) * be, 0.16)
-        # drums: kick on beats, hat on off-beats (not during countdown tension, only light kick)
-        if sec in ("q", "reveal", "cta") and k % 4 == 0:
-            kl = int(0.14 * SR); tt = np.arange(kl) / SR
-            kick = np.sin(2 * np.pi * (120 * np.exp(-tt * 30) + 45) * tt) * np.exp(-tt * 20)
-            add(t0, kick, 0.30)
-        if sec in ("reveal", "cta") and k % 4 == 2:
-            hl = int(0.04 * SR); noise = (np.random.RandomState(k).rand(hl) * 2 - 1) * np.exp(-np.arange(hl) / SR * 90)
-            add(t0, noise, 0.08)
-        if sec == "count" and k % 4 == 0:  # soft pulse for tension
-            kl = int(0.1 * SR); tt = np.arange(kl) / SR
-            add(t0, np.sin(2 * np.pi * 60 * tt) * np.exp(-tt * 25), 0.18)
-    m *= np.minimum(1.0, np.maximum(0.0, (total - np.arange(n_tot) / SR) / 1.5))  # fade out last 1.5s
-    m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.3)                            # fade in
-    return m / max(1e-6, np.abs(m).max()) * 0.38
+    def sec(t0):
+        for nme in ("cta", "reveal", "count", "question", "hook"):
+            if t0 >= STARTS[nme]: return nme
+    k = 0
+    while k * beat / 2 < total:                      # 8th-note grid
+        t0 = k * beat / 2
+        root, tones = chords[int(t0 / (beat * 4)) % 4]
+        s_ = sec(t0)
+        nl = int(beat * 0.45 * SR); env = np.exp(-np.arange(nl) / SR * 9)
+        av = {"hook": 0.05, "question": 0.06, "count": 0.07, "reveal": 0.08, "cta": 0.07}[s_]
+        tone = tones[k % 3] + (12 if s_ in ("reveal", "cta") and (k // 3) % 2 else 0)
+        add(t0, _note(mf(tone), nl, "sq", 0.25) * env, av)           # soft arp
+        if k % 2 == 0 and s_ != "hook":                              # bass on every beat
+            bl = int(beat * 0.9 * SR)
+            add(t0, _note(mf(root), bl, "sq", 0.5) * np.exp(-np.arange(bl) / SR * 4), 0.13)
+        if s_ in ("question", "reveal", "cta") and k % 4 == 0:       # kick on beats 1 and 3
+            kl = int(0.16 * SR); tt = np.arange(kl) / SR
+            add(t0, np.sin(2 * np.pi * (110 * np.exp(-tt * 28) + 42) * tt) * np.exp(-tt * 18), 0.22)
+        if s_ in ("reveal", "cta") and k % 4 == 2:                   # soft hat on beats 2 and 4
+            hl = int(0.045 * SR)
+            add(t0, (np.random.RandomState(k).rand(hl) * 2 - 1) * np.exp(-np.arange(hl) / SR * 80), 0.05)
+        k += 1
+    m *= np.minimum(1.0, np.maximum(0.0, (total - np.arange(n_tot) / SR) / 1.5))
+    m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.3)
+    return m / max(1e-6, np.abs(m).max()) * 0.35
 
 def sfx(path):
-    a = np.zeros(SR * 24)
-    def blip(t0, f, dur=0.12, vol=0.35, decay=18):
+    a = np.zeros(int(SR * TOTAL))
+    def blip(t0, f, dur=0.12, vol=0.30, decay=18):
         n = int(SR * dur); t = np.arange(n) / SR
         w = np.sign(np.sin(2 * np.pi * f * t)) * np.exp(-decay * t) * vol
         i = int(SR * t0); a[i:i + n] += w[:len(a) - i]
-    blip(0, 330, .2); blip(3, 520, .1)
-    for k in range(5): blip(8 + k, 880 if k < 4 else 1320, .15)
-    for k, f in enumerate([440, 554, 659, 880]): blip(13 + k * .5, f, .15)
-    blip(15.5, 1047, .3, .4, 8); blip(15.5, 1319, .3, .3, 8)
-    blip(19, 660, .15); blip(19.25, 880, .3)
-    mix = music(24.0) + a * 0.7
+    blip(0, 330, .2); blip(STARTS["question"], 520, .1)
+    for k in range(4): blip(STARTS["count"] + k, 784 if k < 3 else 1175, .14)
+    r = STARTS["reveal"]
+    for k, f in enumerate([440, 554, 659, 880]): blip(r + k * .5, f, .14)
+    blip(r + 2.2, 1047, .3, .36, 8); blip(r + 2.2, 1319, .3, .26, 8)
+    blip(STARTS["cta"], 660, .14); blip(STARTS["cta"] + .25, 880, .28)
+    mix = music(TOTAL) + a * 0.7
     mix = mix / max(1.0, np.abs(mix).max() / 0.92)
     with wave.open(path, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
