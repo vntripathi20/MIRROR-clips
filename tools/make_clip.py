@@ -159,8 +159,55 @@ def render(name, fn, dur):
     if p.wait() != 0: raise SystemExit("ffmpeg failed: " + name)
     os.replace(tmp, final)
 
+SR = 44100
+
+def _note(f, n, kind="sq", duty=0.5):
+    t = np.arange(n) / SR
+    ph = (t * f) % 1.0
+    return np.where(ph < duty, 1.0, -1.0) if kind == "sq" else np.sin(2 * np.pi * f * t)
+
+def music(total=24.0):
+    """Original royalty-free chiptune loop (A minor: Am-F-C-G), 124 BPM, built for the 24s clip."""
+    n_tot = int(SR * total); m = np.zeros(n_tot)
+    beat = 60.0 / 124; step = beat / 4  # 16th note
+    mf = lambda midi: 440.0 * 2 ** ((midi - 69) / 12)
+    chords = [(45, [57, 60, 64]), (41, [57, 60, 65]), (48, [60, 64, 67]), (43, [59, 62, 67])]  # bass, arp tones
+    def add(t0, arr, vol):
+        i = int(t0 * SR)
+        if i >= n_tot: return
+        j = min(n_tot, i + len(arr)); m[i:j] += arr[:j - i] * vol
+    nsteps = int(total / step)
+    for k in range(nsteps):
+        t0 = k * step
+        bar = int(t0 / (beat * 4)) % 4
+        root, tones = chords[bar]
+        sec = "intro" if t0 < 3 else "q" if t0 < 8 else "count" if t0 < 13 else "reveal" if t0 < 19 else "cta"
+        # arp (16ths), pulse 25%
+        nl = int(step * 0.9 * SR); env = np.exp(-np.arange(nl) / SR * 14)
+        arp_vol = {"intro": 0.05, "q": 0.07, "count": 0.09, "reveal": 0.09, "cta": 0.08}[sec]
+        tone = tones[k % 3] + (12 if sec in ("reveal", "cta") and (k // 3) % 2 else 0)
+        add(t0, _note(mf(tone), nl, "sq", 0.25) * env, arp_vol)
+        # bass (8ths)
+        if k % 2 == 0 and sec != "intro":
+            bl = int(step * 1.8 * SR); be = np.exp(-np.arange(bl) / SR * 7)
+            add(t0, _note(mf(root), bl, "sq", 0.5) * be, 0.16)
+        # drums: kick on beats, hat on off-beats (not during countdown tension, only light kick)
+        if sec in ("q", "reveal", "cta") and k % 4 == 0:
+            kl = int(0.14 * SR); tt = np.arange(kl) / SR
+            kick = np.sin(2 * np.pi * (120 * np.exp(-tt * 30) + 45) * tt) * np.exp(-tt * 20)
+            add(t0, kick, 0.30)
+        if sec in ("reveal", "cta") and k % 4 == 2:
+            hl = int(0.04 * SR); noise = (np.random.RandomState(k).rand(hl) * 2 - 1) * np.exp(-np.arange(hl) / SR * 90)
+            add(t0, noise, 0.08)
+        if sec == "count" and k % 4 == 0:  # soft pulse for tension
+            kl = int(0.1 * SR); tt = np.arange(kl) / SR
+            add(t0, np.sin(2 * np.pi * 60 * tt) * np.exp(-tt * 25), 0.18)
+    m *= np.minimum(1.0, np.maximum(0.0, (total - np.arange(n_tot) / SR) / 1.5))  # fade out last 1.5s
+    m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.3)                            # fade in
+    return m / max(1e-6, np.abs(m).max()) * 0.38
+
 def sfx(path):
-    SR = 44100; a = np.zeros(SR * 24)
+    a = np.zeros(SR * 24)
     def blip(t0, f, dur=0.12, vol=0.35, decay=18):
         n = int(SR * dur); t = np.arange(n) / SR
         w = np.sign(np.sin(2 * np.pi * f * t)) * np.exp(-decay * t) * vol
@@ -170,9 +217,11 @@ def sfx(path):
     for k, f in enumerate([440, 554, 659, 880]): blip(13 + k * .5, f, .15)
     blip(15.5, 1047, .3, .4, 8); blip(15.5, 1319, .3, .3, 8)
     blip(19, 660, .15); blip(19.25, 880, .3)
+    mix = music(24.0) + a * 0.7
+    mix = mix / max(1.0, np.abs(mix).max() / 0.92)
     with wave.open(path, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
-        w.writeframes((np.clip(a, -1, 1) * 32767).astype(np.int16).tobytes())
+        w.writeframes((np.clip(mix, -1, 1) * 32767).astype(np.int16).tobytes())
 
 if __name__ == "__main__":
     for name, fn, dur in SCENES: render(name, fn, dur)
@@ -182,6 +231,6 @@ if __name__ == "__main__":
     silent, final = f"{OUT}/silent.tmp.mp4", f"{OUT}/MIRROR_{brief['date']}.mp4"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", silent])
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", silent, "-i", f"{OUT}/sfx.wav", "-map", "0:v",
-        "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
+        "-map", "1:a", "-af", "loudnorm=I=-14:TP=-1.5:LRA=9", "-ar", "44100", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
     os.replace(final + ".tmp.mp4", final)
     print("picked Q%d (%s) -> %s" % (Q["number"], Q["difficulty"], final))
