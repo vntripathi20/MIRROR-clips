@@ -109,7 +109,7 @@ def s_question(t):
         tc(d, y, ln, F(58), CREAM); y += 78
     tc(d, y + 20, "Pick what MOST people choose.", F(38, "popm"), LIME)
     for i in range(4):
-        a = ease((t - 0.2 - i * 0.2) / 0.3)
+        a = ease((t - 0.2 - i * 0.15) / 0.3)
         if a > 0: card(d, i, 800 + i * 200 + int((1 - a) * 40))
     return im
 
@@ -162,7 +162,7 @@ def s_cta(t):
     tc(d, 1330, "Follow for tomorrow's", F(46, "popm"), PINK)
     return im
 
-SCENES = [("hook", s_hook, 2.5), ("question", s_question, 4.5), ("count", s_count, 4.0),
+SCENES = [("hook", s_hook, 2.5), ("question", s_question, 7.0), ("count", s_count, 4.0),
           ("reveal", s_reveal, 5.5), ("cta", s_cta, 3.5)]
 STARTS = {}
 _t = 0.0
@@ -218,12 +218,9 @@ def music(total):
         av = {"hook": 0.05, "question": 0.06, "count": 0.07, "reveal": 0.08, "cta": 0.07}[s_]
         tone = tones[k % 3] + (12 if s_ in ("reveal", "cta") and (k // 3) % 2 else 0)
         add(t0, _note(mf(tone), nl, "sq", 0.25) * env, av)           # soft arp
-        if k % 2 == 0 and s_ != "hook":                              # bass on every beat
+        if k % 2 == 0 and s_ != "hook":                              # soft low-mid pad note, one octave up (no sub bass)
             bl = int(beat * 0.9 * SR)
-            add(t0, _note(mf(root), bl, "sq", 0.5) * np.exp(-np.arange(bl) / SR * 4), 0.13)
-        if s_ in ("question", "reveal", "cta") and k % 4 == 0:       # kick on beats 1 and 3
-            kl = int(0.16 * SR); tt = np.arange(kl) / SR
-            add(t0, np.sin(2 * np.pi * (110 * np.exp(-tt * 28) + 42) * tt) * np.exp(-tt * 18), 0.22)
+            add(t0, _note(mf(root + 12), bl, "sin") * np.exp(-np.arange(bl) / SR * 3), 0.07)
         if s_ in ("reveal", "cta") and k % 4 == 2:                   # soft hat on beats 2 and 4
             hl = int(0.045 * SR)
             add(t0, (np.random.RandomState(k).rand(hl) * 2 - 1) * np.exp(-np.arange(hl) / SR * 80), 0.05)
@@ -258,6 +255,6 @@ if __name__ == "__main__":
     silent, final = f"{OUT}/silent.tmp.mp4", f"{OUT}/MIRROR_{brief['date']}.mp4"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", silent])
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", silent, "-i", f"{OUT}/sfx.wav", "-map", "0:v",
-        "-map", "1:a", "-af", "loudnorm=I=-14:TP=-1.5:LRA=9", "-ar", "44100", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
+        "-map", "1:a", "-af", "highpass=f=260,highpass=f=260,lowpass=f=6000,loudnorm=I=-14.5:TP=-1.5:LRA=9", "-ar", "44100", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
     os.replace(final + ".tmp.mp4", final)
     print("picked Q%d (%s) -> %s" % (Q["number"], Q["difficulty"], final))
