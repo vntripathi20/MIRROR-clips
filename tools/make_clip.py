@@ -197,43 +197,43 @@ def _note(f, n, kind="sq", duty=0.5):
     return np.where(ph < duty, 1.0, -1.0) if kind == "sq" else np.sin(2 * np.pi * f * t)
 
 def music(total):
-    """Original royalty-free chill chiptune loop (A minor: Am-F-C-G), 88 BPM, soft and slow."""
+    """Original royalty-free lofi loop: warm electric-piano 7th chords, swung brushed hats, vinyl crackle. 76 BPM."""
     n_tot = int(SR * total); m = np.zeros(n_tot)
-    beat = 60.0 / 88
+    beat = 60.0 / 76
     mf = lambda midi: 440.0 * 2 ** ((midi - 69) / 12)
-    chords = [(45, [57, 60, 64]), (41, [57, 60, 65]), (48, [60, 64, 67]), (43, [59, 62, 67])]
+    chords = [[57, 60, 64, 67], [62, 65, 69, 72], [55, 59, 62, 65], [60, 64, 67, 71]]   # Am7 Dm7 G7 Cmaj7
     def add(t0, arr, vol):
         i = int(t0 * SR)
         if i >= n_tot: return
         j = min(n_tot, i + len(arr)); m[i:j] += arr[:j - i] * vol
-    def sec(t0):
-        for nme in ("cta", "reveal", "count", "question", "hook"):
-            if t0 >= STARTS[nme]: return nme
-    k = 0
-    while k * beat / 2 < total:                      # 8th-note grid
-        t0 = k * beat / 2
-        root, tones = chords[int(t0 / (beat * 4)) % 4]
-        s_ = sec(t0)
-        nl = int(beat * 0.45 * SR); env = np.exp(-np.arange(nl) / SR * 9)
-        av = {"hook": 0.05, "question": 0.06, "count": 0.07, "reveal": 0.08, "cta": 0.07}[s_]
-        tone = tones[k % 3] + (12 if s_ in ("reveal", "cta") and (k // 3) % 2 else 0)
-        add(t0, _note(mf(tone), nl, "sq", 0.25) * env, av)           # soft arp
-        if k % 2 == 0 and s_ != "hook":                              # soft low-mid pad note, one octave up (no sub bass)
-            bl = int(beat * 0.9 * SR)
-            add(t0, _note(mf(root + 12), bl, "sin") * np.exp(-np.arange(bl) / SR * 3), 0.07)
-        if s_ in ("reveal", "cta") and k % 4 == 2:                   # soft hat on beats 2 and 4
-            hl = int(0.045 * SR)
-            add(t0, (np.random.RandomState(k).rand(hl) * 2 - 1) * np.exp(-np.arange(hl) / SR * 80), 0.05)
-        k += 1
+    def keys(f, dur):
+        n = int(dur * SR); t = np.arange(n) / SR
+        w = np.sin(2*np.pi*f*t) + 0.30*np.sin(2*np.pi*2*f*t)*np.exp(-4*t) + 0.12*np.sin(2*np.pi*3*f*t)*np.exp(-7*t)
+        w *= (1 + 0.12*np.sin(2*np.pi*4.5*t))                      # gentle tremolo
+        return w * np.minimum(1, t/0.015) * np.exp(-t*2.2)
+    bar = beat * 4
+    for bi in range(int(total / bar) + 1):
+        t0 = bi * bar
+        for j, n_ in enumerate(chords[bi % 4]):
+            add(t0 + j * 0.018, keys(mf(n_), bar * 0.95), 0.05)       # soft rolled chord
+        add(t0 + beat * 2.5, keys(mf(chords[bi % 4][3] + 12), beat * 1.5), 0.03)   # little upper note
+        for k in range(8):                                             # swung brushed hats
+            th = t0 + k * beat / 2 + (beat / 6 if k % 2 else 0)
+            hl = int(0.05 * SR)
+            hat = np.random.RandomState(bi * 8 + k).rand(hl) * 2 - 1
+            add(th, hat * np.exp(-np.arange(hl) / SR * 70), 0.018 if k % 2 else 0.028)
+    rs = np.random.RandomState(7)                                      # vinyl crackle
+    for _ in range(int(total * 14)):
+        add(rs.rand() * total, (rs.rand(60) * 2 - 1) * np.exp(-np.arange(60) / 8.0), 0.03 * rs.rand())
     m *= np.minimum(1.0, np.maximum(0.0, (total - np.arange(n_tot) / SR) / 1.5))
-    m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.3)
+    m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.8)
     return m / max(1e-6, np.abs(m).max()) * 0.35
 
 def sfx(path):
     a = np.zeros(int(SR * TOTAL))
     def blip(t0, f, dur=0.12, vol=0.30, decay=18):
         n = int(SR * dur); t = np.arange(n) / SR
-        w = np.sign(np.sin(2 * np.pi * f * t)) * np.exp(-decay * t) * vol
+        w = np.sin(2 * np.pi * f * t) * np.exp(-decay * t) * vol * 0.6
         i = int(SR * t0); a[i:i + n] += w[:len(a) - i]
     blip(0, 330, .2); blip(STARTS["question"], 520, .1)
     for k in range(4): blip(STARTS["count"] + k, 784 if k < 3 else 1175, .14)
@@ -241,7 +241,7 @@ def sfx(path):
     for k, f in enumerate([440, 554, 659, 880]): blip(r + k * .5, f, .14)
     blip(r + 2.2, 1047, .3, .36, 8); blip(r + 2.2, 1319, .3, .26, 8)
     blip(STARTS["cta"], 660, .14); blip(STARTS["cta"] + .25, 880, .28)
-    mix = music(TOTAL) + a * 0.7
+    mix = music(TOTAL) + a * 0.45
     mix = mix / max(1.0, np.abs(mix).max() / 0.92)
     with wave.open(path, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(SR)
@@ -255,6 +255,6 @@ if __name__ == "__main__":
     silent, final = f"{OUT}/silent.tmp.mp4", f"{OUT}/MIRROR_{brief['date']}.mp4"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", silent])
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", silent, "-i", f"{OUT}/sfx.wav", "-map", "0:v",
-        "-map", "1:a", "-af", "highpass=f=260,highpass=f=260,lowpass=f=6000,loudnorm=I=-14.5:TP=-1.5:LRA=9", "-ar", "44100", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
+        "-map", "1:a", "-af", "highpass=f=120,lowpass=f=4500,loudnorm=I=-22:TP=-2:LRA=9", "-ar", "44100", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", final + ".tmp.mp4"])
     os.replace(final + ".tmp.mp4", final)
     print("picked Q%d (%s) -> %s" % (Q["number"], Q["difficulty"], final))
