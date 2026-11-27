@@ -199,9 +199,18 @@ def _note(f, n, kind="sq", duty=0.5):
 def music(total):
     """Original royalty-free lofi loop: warm electric-piano 7th chords, swung brushed hats, vinyl crackle. 76 BPM."""
     n_tot = int(SR * total); m = np.zeros(n_tot)
-    beat = 60.0 / 76
+    import zlib
+    R = np.random.RandomState(zlib.crc32(str(brief["date"]).encode()))   # new vibe every day, same for a given date
+    beat = 60.0 / R.randint(68, 84)
+    shift = int(R.randint(-3, 4))                                        # key change
+    PROGS = [[[57,60,64,67],[62,65,69,72],[55,59,62,65],[60,64,67,71]],  # Am7 Dm7 G7 Cmaj7
+             [[53,57,60,64],[52,55,59,62],[50,53,57,60],[55,59,62,65]],  # Fmaj7 Em7 Dm7 G7
+             [[60,64,67,71],[57,60,64,67],[62,65,69,72],[55,59,62,65]],  # Cmaj7 Am7 Dm7 G7
+             [[62,65,69,72],[55,58,62,65],[58,62,65,69],[57,61,64,67]],  # Dm7 Gm7 Bbmaj7 A7
+             [[57,60,64,67],[53,57,60,64],[60,64,67,71],[55,59,62,65]]]  # Am7 Fmaj7 Cmaj7 G7
+    chords = [[n + shift for n in c] for c in PROGS[R.randint(len(PROGS))]]
+    hat_amt = R.choice([0.6, 1.0, 1.3]); crackle = R.choice([8, 14, 22]); upper = R.randint(0, 4)
     mf = lambda midi: 440.0 * 2 ** ((midi - 69) / 12)
-    chords = [[57, 60, 64, 67], [62, 65, 69, 72], [55, 59, 62, 65], [60, 64, 67, 71]]   # Am7 Dm7 G7 Cmaj7
     def add(t0, arr, vol):
         i = int(t0 * SR)
         if i >= n_tot: return
@@ -216,14 +225,14 @@ def music(total):
         t0 = bi * bar
         for j, n_ in enumerate(chords[bi % 4]):
             add(t0 + j * 0.018, keys(mf(n_), bar * 0.95), 0.05)       # soft rolled chord
-        add(t0 + beat * 2.5, keys(mf(chords[bi % 4][3] + 12), beat * 1.5), 0.03)   # little upper note
+        add(t0 + beat * (1.5, 2.5, 3.0, 0.5)[upper], keys(mf(chords[bi % 4][(bi + upper) % 4] + 12), beat * 1.5), 0.03)   # little upper note
         for k in range(8):                                             # swung brushed hats
             th = t0 + k * beat / 2 + (beat / 6 if k % 2 else 0)
             hl = int(0.05 * SR)
             hat = np.random.RandomState(bi * 8 + k).rand(hl) * 2 - 1
-            add(th, hat * np.exp(-np.arange(hl) / SR * 70), 0.018 if k % 2 else 0.028)
+            add(th, hat * np.exp(-np.arange(hl) / SR * 70), (0.018 if k % 2 else 0.028) * hat_amt)
     rs = np.random.RandomState(7)                                      # vinyl crackle
-    for _ in range(int(total * 14)):
+    for _ in range(int(total * crackle)):
         add(rs.rand() * total, (rs.rand(60) * 2 - 1) * np.exp(-np.arange(60) / 8.0), 0.03 * rs.rand())
     m *= np.minimum(1.0, np.maximum(0.0, (total - np.arange(n_tot) / SR) / 1.5))
     m *= np.minimum(1.0, np.arange(n_tot) / SR / 0.8)
